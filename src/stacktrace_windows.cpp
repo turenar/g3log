@@ -13,6 +13,7 @@
  * ============================================================================*/
 
 #include "g3log/stacktrace_windows.hpp"
+#include "g3log/g3log.hpp"
 
 #include <windows.h>
 #include <dbghelp.h>
@@ -21,7 +22,9 @@
 #include <cassert>
 #include <vector>
 #include <mutex>
-#include <g3log/g3log.hpp>
+#include <sstream>
+#include <limits>
+#include <iomanip>
 
 
 #if !(defined(WIN32) || defined(_WIN32) || defined(__WIN32__))
@@ -102,9 +105,12 @@ namespace {
 
    // extract readable text from a given stack frame. All thanks to
    // using SymFromAddr and SymGetLineFromAddr64 with the stack pointer
-   std::string getSymbolInformation(const size_t index, const std::vector<uint64_t> &frame_pointers) {
+   void getSymbolInformation(const size_t index, const std::vector<uint64_t> &frame_pointers, std::ostringstream& buf) {
       auto addr = frame_pointers[index];
-      std::string frame_dump = "stack dump [" + std::to_string(index) + "]\t";
+      buf << "stack dump [" << index << "]\t";
+      buf << "0x" << std::hex << std::setfill('0')
+          << std::setw(std::numeric_limits<std::uintptr_t>::digits / 4)
+          << addr << ' ' << std::dec;
 
       DWORD64 displacement64;
       DWORD displacement;
@@ -115,29 +121,25 @@ namespace {
 
       IMAGEHLP_LINE64 line;
       line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
-      std::string lineInformation;
-      std::string callInformation;
       if (SymFromAddr(GetCurrentProcess(), addr, &displacement64, symbol)) {
-         callInformation.append(" ").append({symbol->Name, symbol->NameLen});
          if (SymGetLineFromAddr64(GetCurrentProcess(), addr, &displacement, &line)) {
-            lineInformation.append("\t").append(line.FileName).append(" L: ");
-            lineInformation.append(std::to_string(line.LineNumber));
+            buf << '\t' << line.FileName << " L: " << line.LineNumber;
          }
+         buf << ' ';
+         buf.write(symbol->Name, symbol->NameLen);
       }
-      frame_dump.append(lineInformation).append(callInformation);
-      return frame_dump;
    }
 
 
    // Retrieves all the symbols for the stack frames, fills them witin a text representation and returns it
    std::string convertFramesToText(std::vector<uint64_t> &frame_pointers) {
-      std::string dump; // slightly more efficient than ostringstream
+      std::ostringstream dump;
       const size_t kSize = frame_pointers.size();
       for (size_t index = 0; index < kSize && frame_pointers[index]; ++index) {
-         dump += getSymbolInformation(index, frame_pointers);
-         dump += "\n";
+         getSymbolInformation(index, frame_pointers, dump);
+         dump << '\n';
       }
-      return dump;
+      return dump.str();
    }
 } // anonymous
 
